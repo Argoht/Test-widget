@@ -10,9 +10,13 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.net.Uri
+import android.os.Bundle
+import android.util.TypedValue
 import android.provider.CalendarContract.Instances
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
@@ -39,7 +43,6 @@ private const val CLEAR = P + "CLEAR"
 private const val REFRESH = P + "REFRESH"
 
 private const val JULIAN_EPOCH = 2440588L // Julian day of 1970-01-01, as used by CalendarContract
-private const val MAX_CHIPS = 4
 private const val MAX_TODOS = 12
 private val DOW = arrayOf("LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM")
 private val HM = DateTimeFormatter.ofPattern("HH:mm")
@@ -71,6 +74,8 @@ private class Ev(val title: String, val begin: Long, val allDay: Boolean, val co
 class CalWidget : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = render(ctx)
+
+    override fun onAppWidgetOptionsChanged(ctx: Context, mgr: AppWidgetManager, id: Int, opts: Bundle) = render(ctx)
 
     override fun onReceive(ctx: Context, intent: Intent) {
         super.onReceive(ctx, intent)
@@ -109,8 +114,13 @@ class CalWidget : AppWidgetProvider() {
 
             val rv = RemoteViews(pkg, R.layout.widget)
 
+            // How many event chips fit in a day column, from the widget height (dp): the week strip gets 4/10 of
+            // what is left after padding + header (~84dp); a column spends ~56dp on its labels, a chip ~33dp.
+            val heightDp = mgr.getAppWidgetOptions(ids[0]).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+            val maxChips = if (heightDp == 0) 2 else (((heightDp - 84) * 0.4f - 56) / 33).toInt().coerceIn(1, 8)
+
             // Header
-            rv.setTextViewText(R.id.date, today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)).uppercase(Locale.FRENCH))
+            rv.setImageViewBitmap(R.id.date, dotText(ctx, today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)).uppercase(Locale.FRENCH), 26f))
             rv.setTextViewText(R.id.weeknum, "SEMAINE " + today.get(WeekFields.ISO.weekOfWeekBasedYear()))
             rv.setOnClickPendingIntent(R.id.header, broadcast(ctx, TODAY))
 
@@ -126,7 +136,7 @@ class CalWidget : AppWidgetProvider() {
                     col.setInt(R.id.col, "setBackgroundResource", R.drawable.bg_col_today)
                 }
                 val evs = events[d].orEmpty()
-                val shown = if (evs.size > MAX_CHIPS) MAX_CHIPS - 1 else evs.size
+                val shown = if (evs.size > maxChips) maxChips - 1 else evs.size
                 for (e in evs.take(shown)) {
                     val time = when {
                         e.allDay -> "journée"
@@ -142,7 +152,7 @@ class CalWidget : AppWidgetProvider() {
 
             // Month grid
             val title = month.month.getDisplayName(TextStyle.FULL, Locale.FRENCH).uppercase(Locale.FRENCH)
-            rv.setTextViewText(R.id.month_title, if (month.year == today.year) title else "$title ${month.year}")
+            rv.setImageViewBitmap(R.id.month_title, dotText(ctx, if (month.year == today.year) title else "$title ${month.year}", 16f))
             rv.setOnClickPendingIntent(R.id.month_title, broadcast(ctx, TODAY))
             rv.setOnClickPendingIntent(R.id.prev, broadcast(ctx, PREV))
             rv.setOnClickPendingIntent(R.id.next_month, broadcast(ctx, NEXT))
@@ -218,6 +228,19 @@ class CalWidget : AppWidgetProvider() {
                 today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() + 5_000,
                 broadcast(ctx, REFRESH)
             )
+        }
+
+        // RemoteViews ignores custom fonts on TextViews here, so dot-matrix titles are drawn as bitmaps
+        private fun dotText(ctx: Context, text: String, sp: Float): Bitmap {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = ctx.resources.getFont(R.font.doto)
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, ctx.resources.displayMetrics)
+                color = Color.WHITE
+            }
+            val fm = paint.fontMetricsInt
+            val bmp = Bitmap.createBitmap(paint.measureText(text).toInt() + 2, fm.descent - fm.ascent, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).drawText(text, 0f, -fm.ascent.toFloat(), paint)
+            return bmp
         }
 
         private fun chip(pkg: String, title: String, time: String, color: Int) =
