@@ -117,11 +117,15 @@ class CalWidget : AppWidgetProvider() {
             // How many event chips fit in a day column, from the widget height (dp): the week strip gets 4/10 of
             // what is left after padding + header (~84dp); a column spends ~56dp on its labels, a chip ~33dp.
             val heightDp = mgr.getAppWidgetOptions(ids[0]).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+            // TEMP diagnostic: size the launcher grants this widget, in device pixels
+            val opts = mgr.getAppWidgetOptions(ids[0])
+            val density = ctx.resources.displayMetrics.density
+            val grantedPx = "${(opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) * density).toInt()}×${(heightDp * density).toInt()}px"
+            rv.setTextViewText(R.id.weeknum, "S" + today.get(WeekFields.ISO.weekOfWeekBasedYear()) + " · " + grantedPx)
             val maxChips = if (heightDp == 0) 2 else (((heightDp - 84) * 0.4f - 56) / 33).toInt().coerceIn(1, 8)
 
             // Header
             rv.setImageViewBitmap(R.id.date, dotText(ctx, today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)).uppercase(Locale.FRENCH), 26f))
-            rv.setTextViewText(R.id.weeknum, "SEMAINE " + today.get(WeekFields.ISO.weekOfWeekBasedYear()))
             rv.setOnClickPendingIntent(R.id.header, broadcast(ctx, TODAY))
 
             // Week strip
