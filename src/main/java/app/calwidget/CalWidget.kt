@@ -1,0 +1,267 @@
+package app.calwidget
+
+import android.Manifest
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
+import android.content.ContentUris
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Paint
+import android.net.Uri
+import android.provider.CalendarContract.Instances
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.view.View
+import android.widget.RemoteViews
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.time.temporal.WeekFields
+import java.util.Locale
+
+private const val P = "app.calwidget."
+private const val PREV = P + "PREV"
+private const val NEXT = P + "NEXT"
+private const val TODAY = P + "TODAY"
+private const val TOGGLE = P + "TOGGLE"
+private const val CLEAR = P + "CLEAR"
+private const val REFRESH = P + "REFRESH"
+
+private const val JULIAN_EPOCH = 2440588L // Julian day of 1970-01-01, as used by CalendarContract
+private const val MAX_CHIPS = 4
+private const val MAX_TODOS = 12
+private val DOW = arrayOf("LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM")
+private val HM = DateTimeFormatter.ofPattern("HH:mm")
+
+data class Todo(val id: Long, val text: String, val done: Boolean)
+
+object Todos {
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("widget", Context.MODE_PRIVATE)
+
+    fun load(ctx: Context): List<Todo> {
+        val a = JSONArray(prefs(ctx).getString("todos", "[]"))
+        return List(a.length()) { i ->
+            a.getJSONObject(i).let { Todo(it.getLong("id"), it.getString("text"), it.getBoolean("done")) }
+        }
+    }
+
+    fun save(ctx: Context, list: List<Todo>) {
+        val a = JSONArray()
+        list.forEach { a.put(JSONObject().put("id", it.id).put("text", it.text).put("done", it.done)) }
+        prefs(ctx).edit().putString("todos", a.toString()).apply()
+    }
+
+    fun monthOffset(ctx: Context) = prefs(ctx).getInt("offset", 0)
+    fun setMonthOffset(ctx: Context, v: Int) = prefs(ctx).edit().putInt("offset", v).apply()
+}
+
+private class Ev(val title: String, val begin: Long, val allDay: Boolean, val color: Int, val startDay: Long)
+
+class CalWidget : AppWidgetProvider() {
+
+    override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = render(ctx)
+
+    override fun onReceive(ctx: Context, intent: Intent) {
+        super.onReceive(ctx, intent)
+        val action = intent.action ?: return
+        if (!action.startsWith(P)) return
+        when (action) {
+            PREV -> Todos.setMonthOffset(ctx, Todos.monthOffset(ctx) - 1)
+            NEXT -> Todos.setMonthOffset(ctx, Todos.monthOffset(ctx) + 1)
+            TODAY -> Todos.setMonthOffset(ctx, 0)
+            TOGGLE -> {
+                val id = intent.data?.lastPathSegment?.toLongOrNull()
+                Todos.save(ctx, Todos.load(ctx).map { if (it.id == id) it.copy(done = !it.done) else it })
+            }
+            CLEAR -> Todos.save(ctx, Todos.load(ctx).filter { !it.done })
+        }
+        render(ctx)
+    }
+
+    companion object {
+        fun render(ctx: Context) {
+            val mgr = AppWidgetManager.getInstance(ctx)
+            val ids = mgr.getAppWidgetIds(ComponentName(ctx, CalWidget::class.java))
+            if (ids.isEmpty()) return
+
+            val pkg = ctx.packageName
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now()
+            val weekStart = today.with(DayOfWeek.MONDAY)
+            val month = YearMonth.from(today).plusMonths(Todos.monthOffset(ctx).toLong())
+            val gridStart = month.atDay(1).with(DayOfWeek.MONDAY)
+
+            val granted = ctx.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+            val events = if (granted) loadEvents(
+                ctx, zone, minOf(weekStart, gridStart), maxOf(gridStart.plusDays(42), today.plusDays(15))
+            ) else emptyMap()
+
+            val rv = RemoteViews(pkg, R.layout.widget)
+
+            // Header
+            rv.setTextViewText(R.id.date, today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)).uppercase(Locale.FRENCH))
+            rv.setTextViewText(R.id.weeknum, "SEMAINE " + today.get(WeekFields.ISO.weekOfWeekBasedYear()))
+            rv.setOnClickPendingIntent(R.id.header, broadcast(ctx, TODAY))
+
+            // Week strip
+            rv.removeAllViews(R.id.week)
+            for (i in 0..6) {
+                val d = weekStart.plusDays(i.toLong())
+                val col = RemoteViews(pkg, R.layout.day_col)
+                col.setTextViewText(R.id.dow, DOW[i])
+                col.setTextViewText(R.id.num, d.dayOfMonth.toString())
+                if (d == today) {
+                    col.setInt(R.id.num, "setBackgroundResource", R.drawable.circle_red)
+                    col.setInt(R.id.col, "setBackgroundResource", R.drawable.bg_col_today)
+                }
+                val evs = events[d].orEmpty()
+                val shown = if (evs.size > MAX_CHIPS) MAX_CHIPS - 1 else evs.size
+                for (e in evs.take(shown)) {
+                    val time = when {
+                        e.allDay -> "journée"
+                        e.startDay != d.toEpochDay() + JULIAN_EPOCH -> "suite"
+                        else -> Instant.ofEpochMilli(e.begin).atZone(zone).format(HM)
+                    }
+                    col.addView(R.id.col, chip(pkg, e.title, time, e.color))
+                }
+                if (evs.size > shown) col.addView(R.id.col, chip(pkg, "+${evs.size - shown}", "autres", Color.GRAY))
+                col.setOnClickPendingIntent(R.id.col, openDay(ctx, zone, d))
+                rv.addView(R.id.week, col)
+            }
+
+            // Month grid
+            val title = month.month.getDisplayName(TextStyle.FULL, Locale.FRENCH).uppercase(Locale.FRENCH)
+            rv.setTextViewText(R.id.month_title, if (month.year == today.year) title else "$title ${month.year}")
+            rv.setOnClickPendingIntent(R.id.month_title, broadcast(ctx, TODAY))
+            rv.setOnClickPendingIntent(R.id.prev, broadcast(ctx, PREV))
+            rv.setOnClickPendingIntent(R.id.next_month, broadcast(ctx, NEXT))
+            rv.removeAllViews(R.id.month)
+            for (r in 0..5) {
+                val rowStart = gridStart.plusDays(r * 7L)
+                val row = RemoteViews(pkg, R.layout.month_row)
+                if (rowStart == weekStart) row.setInt(R.id.row, "setBackgroundResource", R.drawable.bg_week_row)
+                for (c in 0..6) {
+                    val d = rowStart.plusDays(c.toLong())
+                    val inMonth = YearMonth.from(d) == month
+                    val n = if (inMonth) events[d]?.size ?: 0 else 0
+                    val cell = RemoteViews(pkg, R.layout.month_cell)
+                    cell.setTextViewText(R.id.num, d.dayOfMonth.toString())
+                    if (!inMonth) cell.setTextColor(R.id.num, 0xFF444444.toInt())
+                    if (d == today) cell.setInt(R.id.num, "setBackgroundResource", R.drawable.circle_red)
+                    cell.setViewVisibility(R.id.dot1, if (n > 0) View.VISIBLE else View.INVISIBLE)
+                    cell.setViewVisibility(R.id.dot2, if (n > 1) View.VISIBLE else View.GONE)
+                    cell.setOnClickPendingIntent(R.id.cell, openDay(ctx, zone, d))
+                    row.addView(R.id.row, cell)
+                }
+                rv.addView(R.id.month, row)
+            }
+
+            // Upcoming events (from tomorrow: today's are already in the week strip)
+            if (granted) {
+                val next = events.entries
+                    .filter { it.key > today }
+                    .flatMap { (d, l) -> l.filter { it.startDay == d.toEpochDay() + JULIAN_EPOCH }.map { d to it } }
+                    .take(2)
+                    .map { (d, e) ->
+                        val label = if (d == today.plusDays(1)) "Demain"
+                        else d.format(DateTimeFormatter.ofPattern("EEE d", Locale.FRENCH)).replaceFirstChar { it.uppercase() }
+                        val time = if (e.allDay) "" else Instant.ofEpochMilli(e.begin).atZone(zone).format(HM) + " "
+                        SpannableString("$label · $time${e.title}").apply {
+                            setSpan(ForegroundColorSpan(Color.WHITE), 0, label.length, 0)
+                        }
+                    }
+                rv.setTextViewText(R.id.next1, next.getOrNull(0) ?: "Rien de prévu")
+                rv.setTextViewText(R.id.next2, next.getOrNull(1) ?: "")
+                rv.setOnClickPendingIntent(R.id.upcoming, openDay(ctx, zone, today))
+            } else {
+                rv.setTextViewText(R.id.next1, "Appuie ici pour afficher")
+                rv.setTextViewText(R.id.next2, "les événements de ton agenda")
+                rv.setOnClickPendingIntent(R.id.upcoming, openApp(ctx))
+            }
+
+            // To-do
+            val todos = Todos.load(ctx)
+            rv.setTextViewText(R.id.todo_count, todos.count { !it.done }.toString())
+            rv.removeAllViews(R.id.todos)
+            // shortcut: no scrolling, only the first MAX_TODOS are shown; switch to a ListView if the list grows
+            for (t in todos.sortedBy { it.done }.take(MAX_TODOS)) {
+                val item = RemoteViews(pkg, R.layout.todo_item)
+                item.setTextViewText(R.id.text, t.text)
+                if (t.done) {
+                    item.setImageViewResource(R.id.check, R.drawable.circle_red)
+                    item.setTextColor(R.id.text, 0xFF555555.toInt())
+                    item.setInt(R.id.text, "setPaintFlags", Paint.STRIKE_THRU_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG)
+                }
+                item.setOnClickPendingIntent(R.id.item, broadcast(ctx, TOGGLE, t.id))
+                rv.addView(R.id.todos, item)
+            }
+            rv.setViewVisibility(R.id.clear, if (todos.any { it.done }) View.VISIBLE else View.GONE)
+            rv.setOnClickPendingIntent(R.id.clear, broadcast(ctx, CLEAR))
+            rv.setOnClickPendingIntent(R.id.add, openApp(ctx))
+
+            mgr.updateAppWidget(ids, rv)
+
+            // Redraw just after midnight so "today" moves; calendar edits show up within updatePeriodMillis (30 min)
+            ctx.getSystemService(AlarmManager::class.java).set(
+                AlarmManager.RTC,
+                today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() + 5_000,
+                broadcast(ctx, REFRESH)
+            )
+        }
+
+        private fun chip(pkg: String, title: String, time: String, color: Int) =
+            RemoteViews(pkg, R.layout.chip).apply {
+                setTextViewText(R.id.title, title)
+                setTextViewText(R.id.time, time)
+                setInt(R.id.bar, "setBackgroundColor", color)
+            }
+
+        private fun loadEvents(ctx: Context, zone: ZoneId, from: LocalDate, to: LocalDate): Map<LocalDate, List<Ev>> {
+            val uri = Instances.CONTENT_URI.buildUpon().also {
+                ContentUris.appendId(it, from.atStartOfDay(zone).toInstant().toEpochMilli())
+                ContentUris.appendId(it, to.atStartOfDay(zone).toInstant().toEpochMilli())
+            }.build()
+            val out = sortedMapOf<LocalDate, MutableList<Ev>>()
+            val cols = arrayOf(Instances.TITLE, Instances.BEGIN, Instances.ALL_DAY, Instances.DISPLAY_COLOR, Instances.START_DAY, Instances.END_DAY)
+            ctx.contentResolver.query(uri, cols, "${Instances.VISIBLE}=1", null, "${Instances.ALL_DAY} DESC, ${Instances.BEGIN}")?.use { c ->
+                while (c.moveToNext()) {
+                    val ev = Ev(c.getString(0) ?: "(sans titre)", c.getLong(1), c.getInt(2) == 1, c.getInt(3) or 0xFF000000.toInt(), c.getLong(4))
+                    for (jd in c.getLong(4)..c.getLong(5)) {
+                        val d = LocalDate.ofEpochDay(jd - JULIAN_EPOCH)
+                        if (d >= from && d < to) out.getOrPut(d) { mutableListOf() } += ev
+                    }
+                }
+            }
+            return out
+        }
+
+        private fun broadcast(ctx: Context, action: String, id: Long = 0): PendingIntent = PendingIntent.getBroadcast(
+            ctx, 0,
+            // the data URI makes each PendingIntent distinct
+            Intent(ctx, CalWidget::class.java).setAction(action).setData(Uri.parse("calwidget://$action/$id")),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        private fun openDay(ctx: Context, zone: ZoneId, d: LocalDate): PendingIntent = PendingIntent.getActivity(
+            ctx, 0,
+            Intent(Intent.ACTION_VIEW, Uri.parse("content://com.android.calendar/time/" + d.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        private fun openApp(ctx: Context): PendingIntent = PendingIntent.getActivity(
+            ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+}
