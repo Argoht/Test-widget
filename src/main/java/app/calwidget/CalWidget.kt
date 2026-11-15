@@ -167,7 +167,7 @@ class CalWidget : AppWidgetProvider() {
                     val n = if (inMonth) events[d]?.size ?: 0 else 0
                     val cell = RemoteViews(pkg, R.layout.month_cell)
                     cell.setTextViewText(R.id.num, d.dayOfMonth.toString())
-                    if (!inMonth) cell.setTextColor(R.id.num, 0xFF444444.toInt())
+                    if (!inMonth) cell.setTextColor(R.id.num, 0xFF5A5A5A.toInt())
                     if (d == today) cell.setInt(R.id.num, "setBackgroundResource", R.drawable.circle_red)
                     cell.setViewVisibility(R.id.dot1, if (n > 0) View.VISIBLE else View.INVISIBLE)
                     cell.setViewVisibility(R.id.dot2, if (n > 1) View.VISIBLE else View.GONE)
@@ -210,7 +210,7 @@ class CalWidget : AppWidgetProvider() {
                 item.setTextViewText(R.id.text, t.text)
                 if (t.done) {
                     item.setImageViewResource(R.id.check, R.drawable.circle_red)
-                    item.setTextColor(R.id.text, 0xFF555555.toInt())
+                    item.setTextColor(R.id.text, 0xFF6A6A6A.toInt())
                     item.setInt(R.id.text, "setPaintFlags", Paint.STRIKE_THRU_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG)
                 }
                 item.setOnClickPendingIntent(R.id.item, broadcast(ctx, TOGGLE, t.id))
