@@ -234,7 +234,7 @@ open class CalWidget : AppWidgetProvider() {
         }
 
         // Nothing's own serif (NType 82) ships with Nothing OS but may not be redistributed: use the phone's copy if present
-        private val nothingSerif: Typeface? by lazy {
+        val nothingSerif: Typeface? by lazy {
             listOf("/system/fonts", "/product/fonts", "/system_ext/fonts")
                 .flatMap { File(it).listFiles()?.toList().orEmpty() }
                 .filter { it.name.contains("ntype", ignoreCase = true) }
@@ -245,7 +245,7 @@ open class CalWidget : AppWidgetProvider() {
         private fun dotText(ctx: Context, text: String, sp: Float) = textBitmap(ctx, text, sp, ctx.resources.getFont(R.font.doto), Color.WHITE)
 
         // RemoteViews ignores custom fonts on TextViews here, so styled titles are drawn as bitmaps (white ones are tinted by the layout)
-        private fun textBitmap(ctx: Context, text: String, sp: Float, face: Typeface, ink: Int): Bitmap {
+        fun textBitmap(ctx: Context, text: String, sp: Float, face: Typeface, ink: Int): Bitmap {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = face
                 textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, ctx.resources.displayMetrics)

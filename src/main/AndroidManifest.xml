@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- special access, granted by the user in Settings > Usage access -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
     <application android:label="Calendrier" android:icon="@drawable/ic_launcher" android:allowBackup="true">
         <activity android:name=".MainActivity" android:exported="true" android:label="Nouvelle tâche"
             android:theme="@android:style/Theme.DeviceDefault.Dialog.MinWidth"
@@ -20,6 +22,12 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_week_info" />
+        </receiver>
+        <receiver android:name=".ScreenWidget" android:exported="false" android:label="Temps d'écran">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_screen_info" />
         </receiver>
     </application>
 </manifest>
