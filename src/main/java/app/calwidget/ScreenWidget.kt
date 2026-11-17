@@ -43,11 +43,11 @@ class ScreenWidget : AppWidgetProvider() {
             val rv = RemoteViews(ctx.packageName, R.layout.widget_screen)
             val serif = CalWidget.nothingSerif ?: Typeface.SERIF
             if (hasUsageAccess(ctx)) {
-                rv.setImageViewBitmap(R.id.time, CalWidget.textBitmap(ctx, format(screenTimeToday(ctx)), 30f, serif, Color.WHITE))
+                rv.setImageViewBitmap(R.id.time, CalWidget.textBitmap(ctx, format(screenTimeToday(ctx)), 26f, serif, Color.WHITE, tight = true))
                 rv.setTextViewText(R.id.label, "Temps d'écran")
                 rv.setOnClickPendingIntent(android.R.id.background, refresh)
             } else {
-                rv.setImageViewBitmap(R.id.time, CalWidget.textBitmap(ctx, "–", 30f, serif, Color.WHITE))
+                rv.setImageViewBitmap(R.id.time, CalWidget.textBitmap(ctx, "–", 26f, serif, Color.WHITE, tight = true))
                 rv.setTextViewText(R.id.label, "Appuie pour autoriser")
                 rv.setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(
                     ctx, 0, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE

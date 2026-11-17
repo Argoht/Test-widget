@@ -238,22 +238,27 @@ open class CalWidget : AppWidgetProvider() {
             listOf("/system/fonts", "/product/fonts", "/system_ext/fonts")
                 .flatMap { File(it).listFiles()?.toList().orEmpty() }
                 .filter { it.name.contains("ntype", ignoreCase = true) }
-                .minByOrNull { if (it.name.contains("82")) 0 else 1 }
-                ?.let { runCatching { Typeface.createFromFile(it) }.getOrNull() }
+                // the regular cut, as Nothing's own widgets use, rather than a headline or bold file
+                .minByOrNull { f -> listOf("regular", "82").indexOfFirst { f.name.contains(it, ignoreCase = true) }.let { if (it < 0) 9 else it } }
+                ?.let { runCatching { Typeface.Builder(it).setFontVariationSettings("'wght' 400").build() }.getOrNull() }
         }
 
         private fun dotText(ctx: Context, text: String, sp: Float) = textBitmap(ctx, text, sp, ctx.resources.getFont(R.font.doto), Color.WHITE)
 
         // RemoteViews ignores custom fonts on TextViews here, so styled titles are drawn as bitmaps (white ones are tinted by the layout)
-        fun textBitmap(ctx: Context, text: String, sp: Float, face: Typeface, ink: Int): Bitmap {
+        fun textBitmap(ctx: Context, text: String, sp: Float, face: Typeface, ink: Int, tight: Boolean = false): Bitmap {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = face
                 textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, ctx.resources.displayMetrics)
                 color = ink
             }
+            // tight: crop to the ink, so the layout can space it like text without the font's line padding
             val fm = paint.fontMetricsInt
-            val bmp = Bitmap.createBitmap(paint.measureText(text).toInt() + 2, fm.descent - fm.ascent, Bitmap.Config.ARGB_8888)
-            Canvas(bmp).drawText(text, 0f, -fm.ascent.toFloat(), paint)
+            val ink = android.graphics.Rect().also { paint.getTextBounds(text, 0, text.length, it) }
+            val top = if (tight) ink.top else fm.ascent
+            val bottom = if (tight) ink.bottom else fm.descent
+            val bmp = Bitmap.createBitmap(paint.measureText(text).toInt() + 2, bottom - top, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).drawText(text, 0f, -top.toFloat(), paint)
             return bmp
         }
 
