@@ -1,0 +1,9 @@
+<resources>
+    <color name="bg">#FFFFFF</color>
+    <color name="surface">#F0F0F0</color>
+    <color name="fg">#000000</color>
+    <color name="fg2">#6E6E6E</color>
+    <color name="fg3">#B4B4B4</color>
+    <color name="line">#CFCFCF</color>
+    <color name="btn">#E6E6E6</color>
+</resources>

@@ -1,14 +1,18 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@android:id/background"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:background="@drawable/bg_widget" android:padding="14dp">
+    android:background="@drawable/bg_widget" android:padding="14dp" android:baselineAligned="false">
 
-    <LinearLayout android:id="@+id/header" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-        <ImageView android:id="@+id/date" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        <TextView android:id="@+id/weeknum" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:gravity="end"
-            android:textSize="10sp" android:textColor="#D71921" android:letterSpacing="0.15"/>
+    <LinearLayout android:id="@+id/header" android:layout_width="84dp" android:layout_height="match_parent"
+        android:orientation="vertical" android:gravity="center_horizontal" android:paddingTop="8dp">
+        <TextView android:id="@+id/day" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:fontFamily="serif" android:textSize="24sp" android:textColor="#D71921"/>
+        <TextView android:id="@+id/daynum" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:fontFamily="serif" android:textSize="56sp" android:textColor="@color/fg" android:includeFontPadding="false"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="0dp" android:layout_weight="1"/>
+        <ImageView android:id="@+id/new_event" android:layout_width="48dp" android:layout_height="48dp" android:padding="14dp"
+            android:background="@drawable/circle_btn" android:src="@drawable/ic_plus" android:contentDescription="Nouvel événement"/>
     </LinearLayout>
 
-    <LinearLayout android:id="@+id/week" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
-        android:layout_marginTop="10dp" android:baselineAligned="false"/>
-
+    <LinearLayout android:id="@+id/events" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent"
+        android:orientation="vertical" android:layout_marginStart="8dp"/>
 </LinearLayout>

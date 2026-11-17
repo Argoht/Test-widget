@@ -14,12 +14,14 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.util.TypedValue
+import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Instances
 import android.text.SpannableString
-import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.View
 import android.widget.RemoteViews
 import org.json.JSONArray
@@ -31,7 +33,6 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
-import java.time.temporal.WeekFields
 import java.util.Locale
 
 private const val P = "app.calwidget."
@@ -44,7 +45,6 @@ private const val REFRESH = P + "REFRESH"
 
 private const val JULIAN_EPOCH = 2440588L // Julian day of 1970-01-01, as used by CalendarContract
 private const val MAX_TODOS = 12
-private val DOW = arrayOf("LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM")
 private val HM = DateTimeFormatter.ofPattern("HH:mm")
 
 data class Todo(val id: Long, val text: String, val done: Boolean)
@@ -69,7 +69,7 @@ object Todos {
     fun setMonthOffset(ctx: Context, v: Int) = prefs(ctx).edit().putInt("offset", v).apply()
 }
 
-private class Ev(val title: String, val begin: Long, val allDay: Boolean, val color: Int, val startDay: Long)
+private class Ev(val title: String, val begin: Long, val end: Long, val allDay: Boolean, val startDay: Long)
 
 open class CalWidget : AppWidgetProvider() {
 
@@ -116,40 +116,34 @@ open class CalWidget : AppWidgetProvider() {
             val rv = RemoteViews(pkg, R.layout.widget)
             val wk = RemoteViews(pkg, R.layout.widget_week)
 
-            // How many event chips fit in a day column, from the week widget height (dp): padding + header take
-            // ~70dp, a column spends ~56dp on its labels, a chip ~33dp.
+            // Today's agenda: as many cards as fit the widget height (a card is ~65dp, padding ~28dp)
             val heightDp = weekIds.firstOrNull()?.let { mgr.getAppWidgetOptions(it).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) } ?: 0
-            val maxChips = if (heightDp == 0) 2 else ((heightDp - 70 - 56) / 33).coerceIn(1, 8)
-
-            // Header
-            wk.setImageViewBitmap(R.id.date, dotText(ctx, today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)).uppercase(Locale.FRENCH), 26f))
-            wk.setTextViewText(R.id.weeknum, "SEMAINE " + today.get(WeekFields.ISO.weekOfWeekBasedYear()))
-            wk.setOnClickPendingIntent(R.id.header, broadcast(ctx, TODAY))
-
-            // Week strip
-            wk.removeAllViews(R.id.week)
-            for (i in 0..6) {
-                val d = weekStart.plusDays(i.toLong())
-                val col = RemoteViews(pkg, R.layout.day_col)
-                col.setTextViewText(R.id.dow, DOW[i])
-                col.setTextViewText(R.id.num, d.dayOfMonth.toString())
-                if (d == today) {
-                    col.setInt(R.id.num, "setBackgroundResource", R.drawable.circle_red)
-                    col.setInt(R.id.col, "setBackgroundResource", R.drawable.bg_col_today)
+            val maxCards = if (heightDp == 0) 2 else ((heightDp - 22) / 65).coerceAtLeast(1)
+            wk.setTextViewText(R.id.day, today.format(DateTimeFormatter.ofPattern("EEE", Locale.FRENCH)).trimEnd('.').replaceFirstChar { it.uppercase() })
+            wk.setTextViewText(R.id.daynum, today.dayOfMonth.toString())
+            wk.setOnClickPendingIntent(R.id.header, openDay(ctx, zone, today))
+            wk.setOnClickPendingIntent(R.id.new_event, PendingIntent.getActivity(
+                ctx, 0, Intent(Intent.ACTION_INSERT, Events.CONTENT_URI).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE
+            ))
+            wk.removeAllViews(R.id.events)
+            val todayEvs = events[today].orEmpty()
+            val cards = when {
+                !granted -> listOf("Autoriser l'agenda" to "Appuie pour afficher tes événements")
+                todayEvs.isEmpty() -> listOf("Rien de prévu" to "Journée libre")
+                else -> {
+                    val shown = if (todayEvs.size > maxCards) maxCards - 1 else todayEvs.size
+                    todayEvs.take(shown).map { e ->
+                        e.title to if (e.allDay) "Toute la journée"
+                        else Instant.ofEpochMilli(e.begin).atZone(zone).format(HM) + " – " + Instant.ofEpochMilli(e.end).atZone(zone).format(HM)
+                    } + if (todayEvs.size > shown) listOf("+${todayEvs.size - shown} autres" to "Voir dans l'agenda") else emptyList()
                 }
-                val evs = events[d].orEmpty()
-                val shown = if (evs.size > maxChips) maxChips - 1 else evs.size
-                for (e in evs.take(shown)) {
-                    val time = when {
-                        e.allDay -> "journée"
-                        e.startDay != d.toEpochDay() + JULIAN_EPOCH -> "suite"
-                        else -> Instant.ofEpochMilli(e.begin).atZone(zone).format(HM)
-                    }
-                    col.addView(R.id.col, chip(pkg, e.title, time, e.color))
-                }
-                if (evs.size > shown) col.addView(R.id.col, chip(pkg, "+${evs.size - shown}", "autres", Color.GRAY))
-                col.setOnClickPendingIntent(R.id.col, openDay(ctx, zone, d))
-                wk.addView(R.id.week, col)
+            }
+            for ((title, time) in cards) {
+                val card = RemoteViews(pkg, R.layout.event_card)
+                card.setTextViewText(R.id.title, title)
+                card.setTextViewText(R.id.time, time)
+                card.setOnClickPendingIntent(R.id.card, if (granted) openDay(ctx, zone, today) else openApp(ctx))
+                wk.addView(R.id.events, card)
             }
 
             // Month grid
@@ -169,8 +163,11 @@ open class CalWidget : AppWidgetProvider() {
                     val n = if (inMonth) events[d]?.size ?: 0 else 0
                     val cell = RemoteViews(pkg, R.layout.month_cell)
                     cell.setTextViewText(R.id.num, d.dayOfMonth.toString())
-                    if (!inMonth) cell.setTextColor(R.id.num, 0xFF5A5A5A.toInt())
-                    if (d == today) cell.setInt(R.id.num, "setBackgroundResource", R.drawable.circle_red)
+                    if (!inMonth) cell.setColorStateList(R.id.num, "setTextColor", R.color.fg3)
+                    if (d == today) {
+                        cell.setInt(R.id.num, "setBackgroundResource", R.drawable.circle_red)
+                        cell.setTextColor(R.id.num, Color.WHITE)
+                    }
                     cell.setViewVisibility(R.id.dot1, if (n > 0) View.VISIBLE else View.INVISIBLE)
                     cell.setViewVisibility(R.id.dot2, if (n > 1) View.VISIBLE else View.GONE)
                     cell.setOnClickPendingIntent(R.id.cell, openDay(ctx, zone, d))
@@ -190,7 +187,7 @@ open class CalWidget : AppWidgetProvider() {
                         else d.format(DateTimeFormatter.ofPattern("EEE d", Locale.FRENCH)).replaceFirstChar { it.uppercase() }
                         val time = if (e.allDay) "" else Instant.ofEpochMilli(e.begin).atZone(zone).format(HM) + " "
                         SpannableString("$label · $time${e.title}").apply {
-                            setSpan(ForegroundColorSpan(Color.WHITE), 0, label.length, 0)
+                            setSpan(StyleSpan(Typeface.BOLD), 0, label.length, 0)
                         }
                     }
                 rv.setTextViewText(R.id.next1, next.getOrNull(0) ?: "Rien de prévu")
@@ -212,7 +209,7 @@ open class CalWidget : AppWidgetProvider() {
                 item.setTextViewText(R.id.text, t.text)
                 if (t.done) {
                     item.setImageViewResource(R.id.check, R.drawable.circle_red)
-                    item.setTextColor(R.id.text, 0xFF6A6A6A.toInt())
+                    item.setColorStateList(R.id.text, "setTextColor", R.color.fg3)
                     item.setInt(R.id.text, "setPaintFlags", Paint.STRIKE_THRU_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG)
                 }
                 item.setOnClickPendingIntent(R.id.item, broadcast(ctx, TOGGLE, t.id))
@@ -246,23 +243,16 @@ open class CalWidget : AppWidgetProvider() {
             return bmp
         }
 
-        private fun chip(pkg: String, title: String, time: String, color: Int) =
-            RemoteViews(pkg, R.layout.chip).apply {
-                setTextViewText(R.id.title, title)
-                setTextViewText(R.id.time, time)
-                setInt(R.id.bar, "setBackgroundColor", color)
-            }
-
         private fun loadEvents(ctx: Context, zone: ZoneId, from: LocalDate, to: LocalDate): Map<LocalDate, List<Ev>> {
             val uri = Instances.CONTENT_URI.buildUpon().also {
                 ContentUris.appendId(it, from.atStartOfDay(zone).toInstant().toEpochMilli())
                 ContentUris.appendId(it, to.atStartOfDay(zone).toInstant().toEpochMilli())
             }.build()
             val out = sortedMapOf<LocalDate, MutableList<Ev>>()
-            val cols = arrayOf(Instances.TITLE, Instances.BEGIN, Instances.ALL_DAY, Instances.DISPLAY_COLOR, Instances.START_DAY, Instances.END_DAY)
+            val cols = arrayOf(Instances.TITLE, Instances.BEGIN, Instances.END, Instances.ALL_DAY, Instances.START_DAY, Instances.END_DAY)
             ctx.contentResolver.query(uri, cols, "${Instances.VISIBLE}=1", null, "${Instances.ALL_DAY} DESC, ${Instances.BEGIN}")?.use { c ->
                 while (c.moveToNext()) {
-                    val ev = Ev(c.getString(0) ?: "(sans titre)", c.getLong(1), c.getInt(2) == 1, c.getInt(3) or 0xFF000000.toInt(), c.getLong(4))
+                    val ev = Ev(c.getString(0) ?: "(sans titre)", c.getLong(1), c.getLong(2), c.getInt(3) == 1, c.getLong(4))
                     for (jd in c.getLong(4)..c.getLong(5)) {
                         val d = LocalDate.ofEpochDay(jd - JULIAN_EPOCH)
                         if (d >= from && d < to) out.getOrPut(d) { mutableListOf() } += ev
@@ -292,5 +282,5 @@ open class CalWidget : AppWidgetProvider() {
     }
 }
 
-/** Week strip on its own, so the two halves can each fill their launcher cells. Shares CalWidget's logic. */
+/** Today's agenda on its own, so the two halves can each fill their launcher cells. Shares CalWidget's logic. */
 class WeekWidget : CalWidget()
