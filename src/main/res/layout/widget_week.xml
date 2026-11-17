@@ -1,6 +1,12 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@android:id/background"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@drawable/bg_widget" android:padding="14dp" android:baselineAligned="false">
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@android:id/background"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_widget">
+
+    <!-- decoration: thin red waves behind the content -->
+    <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
+        android:src="@drawable/bg_waves" android:scaleType="fitXY" android:importantForAccessibility="no"/>
+
+<LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+    android:padding="14dp" android:baselineAligned="false">
 
     <LinearLayout android:id="@+id/header" android:layout_width="76dp" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center_horizontal" android:paddingTop="4dp">
@@ -14,3 +20,4 @@
     <LinearLayout android:id="@+id/events" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent"
         android:orientation="vertical" android:layout_marginStart="8dp"/>
 </LinearLayout>
+</FrameLayout>
