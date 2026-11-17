@@ -22,6 +22,7 @@ import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Instances
 import android.text.SpannableString
 import android.text.style.StyleSpan
+import java.io.File
 import android.view.View
 import android.widget.RemoteViews
 import org.json.JSONArray
@@ -119,8 +120,10 @@ open class CalWidget : AppWidgetProvider() {
             // Today's agenda: as many cards as fit the widget height (a card is ~65dp, padding ~28dp)
             val heightDp = weekIds.firstOrNull()?.let { mgr.getAppWidgetOptions(it).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) } ?: 0
             val maxCards = if (heightDp == 0) 2 else ((heightDp - 22) / 65).coerceAtLeast(1)
-            wk.setTextViewText(R.id.day, today.format(DateTimeFormatter.ofPattern("EEE", Locale.FRENCH)).trimEnd('.').replaceFirstChar { it.uppercase() })
-            wk.setTextViewText(R.id.daynum, today.dayOfMonth.toString())
+            val serif = nothingSerif ?: Typeface.SERIF
+            val day = today.format(DateTimeFormatter.ofPattern("EEE", Locale.FRENCH)).trimEnd('.').replaceFirstChar { it.uppercase() }
+            wk.setImageViewBitmap(R.id.day, textBitmap(ctx, day, 20f, serif, 0xFFD71921.toInt()))
+            wk.setImageViewBitmap(R.id.daynum, textBitmap(ctx, today.dayOfMonth.toString(), 42f, serif, Color.WHITE))
             wk.setOnClickPendingIntent(R.id.header, openDay(ctx, zone, today))
             wk.setOnClickPendingIntent(R.id.new_event, PendingIntent.getActivity(
                 ctx, 0, Intent(Intent.ACTION_INSERT, Events.CONTENT_URI).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE
@@ -230,12 +233,23 @@ open class CalWidget : AppWidgetProvider() {
             )
         }
 
-        // RemoteViews ignores custom fonts on TextViews here, so dot-matrix titles are drawn as bitmaps
-        private fun dotText(ctx: Context, text: String, sp: Float): Bitmap {
+        // Nothing's own serif (NType 82) ships with Nothing OS but may not be redistributed: use the phone's copy if present
+        private val nothingSerif: Typeface? by lazy {
+            listOf("/system/fonts", "/product/fonts", "/system_ext/fonts")
+                .flatMap { File(it).listFiles()?.toList().orEmpty() }
+                .filter { it.name.contains("ntype", ignoreCase = true) }
+                .minByOrNull { if (it.name.contains("82")) 0 else 1 }
+                ?.let { runCatching { Typeface.createFromFile(it) }.getOrNull() }
+        }
+
+        private fun dotText(ctx: Context, text: String, sp: Float) = textBitmap(ctx, text, sp, ctx.resources.getFont(R.font.doto), Color.WHITE)
+
+        // RemoteViews ignores custom fonts on TextViews here, so styled titles are drawn as bitmaps (white ones are tinted by the layout)
+        private fun textBitmap(ctx: Context, text: String, sp: Float, face: Typeface, ink: Int): Bitmap {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = ctx.resources.getFont(R.font.doto)
+                typeface = face
                 textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, ctx.resources.displayMetrics)
-                color = Color.WHITE
+                color = ink
             }
             val fm = paint.fontMetricsInt
             val bmp = Bitmap.createBitmap(paint.measureText(text).toInt() + 2, fm.descent - fm.ascent, Bitmap.Config.ARGB_8888)
