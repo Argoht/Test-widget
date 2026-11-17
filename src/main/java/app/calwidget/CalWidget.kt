@@ -71,7 +71,7 @@ object Todos {
 
 private class Ev(val title: String, val begin: Long, val allDay: Boolean, val color: Int, val startDay: Long)
 
-class CalWidget : AppWidgetProvider() {
+open class CalWidget : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = render(ctx)
 
@@ -98,7 +98,8 @@ class CalWidget : AppWidgetProvider() {
         fun render(ctx: Context) {
             val mgr = AppWidgetManager.getInstance(ctx)
             val ids = mgr.getAppWidgetIds(ComponentName(ctx, CalWidget::class.java))
-            if (ids.isEmpty()) return
+            val weekIds = mgr.getAppWidgetIds(ComponentName(ctx, WeekWidget::class.java))
+            if (ids.isEmpty() && weekIds.isEmpty()) return
 
             val pkg = ctx.packageName
             val zone = ZoneId.systemDefault()
@@ -113,19 +114,20 @@ class CalWidget : AppWidgetProvider() {
             ) else emptyMap()
 
             val rv = RemoteViews(pkg, R.layout.widget)
+            val wk = RemoteViews(pkg, R.layout.widget_week)
 
-            // How many event chips fit in a day column, from the widget height (dp): the week strip gets 4/10 of
-            // what is left after padding + header (~84dp); a column spends ~56dp on its labels, a chip ~33dp.
-            val heightDp = mgr.getAppWidgetOptions(ids[0]).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
-            val maxChips = if (heightDp == 0) 2 else (((heightDp - 84) * 0.4f - 56) / 33).toInt().coerceIn(1, 8)
+            // How many event chips fit in a day column, from the week widget height (dp): padding + header take
+            // ~70dp, a column spends ~56dp on its labels, a chip ~33dp.
+            val heightDp = weekIds.firstOrNull()?.let { mgr.getAppWidgetOptions(it).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) } ?: 0
+            val maxChips = if (heightDp == 0) 2 else ((heightDp - 70 - 56) / 33).coerceIn(1, 8)
 
             // Header
-            rv.setImageViewBitmap(R.id.date, dotText(ctx, today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)).uppercase(Locale.FRENCH), 26f))
-            rv.setTextViewText(R.id.weeknum, "SEMAINE " + today.get(WeekFields.ISO.weekOfWeekBasedYear()))
-            rv.setOnClickPendingIntent(R.id.header, broadcast(ctx, TODAY))
+            wk.setImageViewBitmap(R.id.date, dotText(ctx, today.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)).uppercase(Locale.FRENCH), 26f))
+            wk.setTextViewText(R.id.weeknum, "SEMAINE " + today.get(WeekFields.ISO.weekOfWeekBasedYear()))
+            wk.setOnClickPendingIntent(R.id.header, broadcast(ctx, TODAY))
 
             // Week strip
-            rv.removeAllViews(R.id.week)
+            wk.removeAllViews(R.id.week)
             for (i in 0..6) {
                 val d = weekStart.plusDays(i.toLong())
                 val col = RemoteViews(pkg, R.layout.day_col)
@@ -147,7 +149,7 @@ class CalWidget : AppWidgetProvider() {
                 }
                 if (evs.size > shown) col.addView(R.id.col, chip(pkg, "+${evs.size - shown}", "autres", Color.GRAY))
                 col.setOnClickPendingIntent(R.id.col, openDay(ctx, zone, d))
-                rv.addView(R.id.week, col)
+                wk.addView(R.id.week, col)
             }
 
             // Month grid
@@ -220,7 +222,8 @@ class CalWidget : AppWidgetProvider() {
             rv.setOnClickPendingIntent(R.id.clear, broadcast(ctx, CLEAR))
             rv.setOnClickPendingIntent(R.id.add, openApp(ctx))
 
-            mgr.updateAppWidget(ids, rv)
+            if (ids.isNotEmpty()) mgr.updateAppWidget(ids, rv)
+            if (weekIds.isNotEmpty()) mgr.updateAppWidget(weekIds, wk)
 
             // Redraw just after midnight so "today" moves; calendar edits show up within updatePeriodMillis (30 min)
             ctx.getSystemService(AlarmManager::class.java).set(
@@ -288,3 +291,6 @@ class CalWidget : AppWidgetProvider() {
         )
     }
 }
+
+/** Week strip on its own, so the two halves can each fill their launcher cells. Shares CalWidget's logic. */
+class WeekWidget : CalWidget()
